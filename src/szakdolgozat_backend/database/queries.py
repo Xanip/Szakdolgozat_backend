@@ -1,5 +1,8 @@
+import pandas
+
 from .connection import get_connection, close_connection
 from sqlalchemy import text
+from pandas import read_sql
 
 def get_dim_author():
     conn = get_connection()
@@ -70,3 +73,17 @@ def get_fact_exchange():
     data = result.fetchall()
     close_connection(conn)
     return [dict(row._mapping) for row in data] if data else []
+
+def get_dataFrames()-> dict[str, pandas.DataFrame]:
+    tables = ["DimAuthor", "DimCategory", "DimCurrency", "DimDate", "DimSource", "FactNews", "FactExchange"]
+    dataFrames = {}
+
+    conn = get_connection()
+    try:
+        for table in tables:
+            query = text(f"SELECT * FROM [{table}]")
+            dataFrames[table] = read_sql(query, conn)
+    
+        return dataFrames
+    finally:
+        close_connection(conn)

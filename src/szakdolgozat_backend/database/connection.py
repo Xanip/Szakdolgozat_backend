@@ -21,6 +21,10 @@ engine = create_engine(
     )
 )
 
+def get_engine() -> Engine:
+    """returns the engine for the database"""
+    return engine
+
 def get_connection():
     """returns a connection to the database"""
     return engine.connect()
