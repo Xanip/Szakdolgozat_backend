@@ -1,5 +1,6 @@
 import pandas as pd
 from pandas import DataFrame
+from pydantic import BaseModel
 
 def exchangeRateChartResponse(
     chartData: DataFrame | None,
@@ -26,3 +27,8 @@ def waterfallVarianceResponse(waterfall_variance: DataFrame | None) -> dict:
         "waterfallVarianceChart_X": waterfall_variance["Year_Month"].astype(str).tolist() if waterfall_variance is not None else [],
         "waterfallVarianceChart_Y": waterfall_variance["Variance"].tolist() if waterfall_variance is not None else [],
     }
+
+class DailyHeatmapResponse(BaseModel):
+    x_data: list[str]
+    y_data: list[str]
+    data: list[list[float | None]]

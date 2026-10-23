@@ -1,5 +1,8 @@
 
 
+import pandas as pd
+
+
 class Snapshot:
     """A snapshot of the database"""
     def __init__(self, DimAuthors, DimCategories, DimCurrencies, DimDates, DimSources, FactExchangeRates, FactNews):
@@ -10,6 +13,10 @@ class Snapshot:
         self.DimSources = DimSources
         self.FactExchangeRates = FactExchangeRates
         self.FactNews = FactNews
+
+        self.DailyRatePercentChange = pd.DataFrame(
+            columns=["BaseCurrency", "TargetCurrency", "DailyPercentChange"]
+        )
 
     def get_snapshot_memory(self) -> dict[str, int]:
         """returns the memory usage of the snapshot's tables in bytes"""
