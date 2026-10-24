@@ -1,13 +1,35 @@
 from datetime import date
+from fastapi.encoders import jsonable_encoder
 from typing_extensions import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
-import pandas as pd
 from szakdolgozat_backend.response_models.chartResponses import DailyHeatmapResponse
+from szakdolgozat_backend.response_models.mediaResponses import MediaAnalyticsResponse
 from szakdolgozat_backend.services.ratesServices import SelectedRateChart, WaterfallVariance, LatestRate, PreviousRate, StartPeriodRate, DailyPercentChange, PeriodPercentChange 
+from szakdolgozat_backend.services.mediaServices import NewsFilter, SelectedDateNews, build_media_dataset
 from szakdolgozat_backend.response_models.fx_performance import create_fx_performance_response
+from pydantic import StringConstraints
+
+from time import perf_counter
+
+CurrencyCode = Annotated[
+    str,
+    StringConstraints(min_length=3, max_length=3),
+]
 
 router = APIRouter(prefix="/exchange-rates", tags=["Exchange Rates"])
+
+@router.get("/pages")
+def get_filter_data(request: Request):
+    """Return DimTables for filtering in the front-end."""
+    snapshot = request.app.state.snapshot
+
+    return jsonable_encoder({
+        "DimAuthors": snapshot.DimAuthors.to_dict(orient="records"),
+        "DimCategories": snapshot.DimCategories.to_dict(orient="records"),
+        "DimCurrencies": (snapshot.DimCurrencies.astype(object).where(snapshot.DimCurrencies.notna(), None).to_dict(orient="records")),
+        "DimSources": snapshot.DimSources.to_dict(orient="records"),
+    })
 
 @router.get("/pages/FX_performance")
 def get_fx_performance_data(
@@ -64,10 +86,7 @@ def get_fx_performance_data(
 @router.get("/pages/Daily_heatmap")
 def get_daily_heatmap_data(
     request: Request,
-    Currencies: Annotated[
-        list[Annotated[str, Query(min_length=3, max_length=3)]],
-        Query(),
-    ]
+    Currencies: Annotated[list[CurrencyCode] | None, Query()] = None,
 ):
     # legnagyobb DateID a FactExchange táblában lesz a date amit használunk. 
     # Oszlopok a Currencies listában a valuták. Sorok az összes elérhető valuta.
@@ -79,39 +98,113 @@ def get_daily_heatmap_data(
     # Y_data = az összes valuta (sorok)
     # X_data = a Currencies listában megadott valuták (oszlopok)
     # data = X_data * Y_data mátrix, ahol a cellákban a napi változás százalékban van, vagy null ha nincs érték.
+    start = perf_counter()
+
     snapshot = request.app.state.snapshot
+    matrix = snapshot.DailyRatePercentChangeMatrix
 
-    X_data = [currency.upper() for currency in Currencies]
-    Y_data = snapshot.DimCurrencies["CurrencyCode"].tolist()
+    print(f"Snapshot access: {perf_counter() - start:.4f} s")
 
-    # Pénznempár -> előre kiszámított változás
-    changes = snapshot.DailyRatePercentChange
+    start = perf_counter()
 
-    lookup = {
-        (row.BaseCurrency, row.TargetCurrency): row.DailyPercentChange
-        for row in changes.itertuples(index=False)
-    }
+    if Currencies:
+        selected = [currency.upper() for currency in Currencies]
 
-    data = []
+        unknown = set(selected) - set(matrix.columns)
+        if unknown:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown currencies: {sorted(unknown)}",
+            )
 
-    for base_currency in Y_data:
-        row_data = []
+        filtered = matrix.loc[:, selected]
+    else:
+        filtered = matrix
 
-        for target_currency in X_data:
-            if base_currency == target_currency:
-                value = 0.0
-            else:
-                value = lookup.get((base_currency, target_currency))
+    print(f"Matrix selection: {perf_counter() - start:.4f} s")
 
-                if pd.isna(value):
-                    value = None
+    start = perf_counter()
 
-            row_data.append(value)
-
-        data.append(row_data)
-
-    return DailyHeatmapResponse(
-        x_data=X_data,
-        y_data=Y_data,
-        data=data,
+    response = DailyHeatmapResponse(
+        x_data=filtered.columns.tolist(),
+        y_data=filtered.index.tolist(),
+        data=(
+            filtered.astype(object)
+            .where(filtered.notna(), None)
+            .values.tolist()
+        ),
     )
+    print(f"Response preparation: {perf_counter() - start:.4f} s")
+
+    return response
+
+
+@router.get("/pages/Media_analytics")
+def get_media_analytics_data(
+    request: Request,
+    StartDate:  date,
+    ToDate: date,
+    SourceFilter: str | None = None,
+    CategoryFilter: str | None = None,
+    IncludeMain: bool = True,
+):
+    # return értékek 
+    # táblázat: Date, SourceName, CategoryName, Title, URL
+    # Döntött oszlop diagramm: Y=SourceName, X=Count
+    # Donut diagramm: jelmagyarázat=CategoryName, érték=Count
+
+    # két féle adat megadása:
+    # main: Category és Source szűrők nélkül
+    # szűrt: Category és Source szűrőkkel
+    if StartDate > ToDate:
+        raise HTTPException(
+            status_code=422,
+            detail="StartDate cannot be later than ToDate.",
+        )
+
+    if SourceFilter is not None and CategoryFilter is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="SourceFilter and CategoryFilter cannot be used together.",
+        )
+    
+    snapshot = request.app.state.snapshot
+    try:
+        mainData = SelectedDateNews(snapshot, StartDate, ToDate)
+        #ha van szűrő akkor elvégezzük a szűrést, ha nincs akkor a mainData-t használjuk a további feldolgozáshoz
+        has_filter = (SourceFilter is not None or CategoryFilter is not None)
+
+        # Csak akkor kell alapadatokat visszaküldeni,
+        # ha IncludeMain=True.
+        main_response = (
+            build_media_dataset(snapshot, mainData)
+            if IncludeMain
+            else None
+        )
+        
+        # Szűrt adatok csak aktív szűrő esetén.
+        if has_filter:
+            filteredNews = NewsFilter(
+                snapshot=snapshot,
+                mainData=mainData,
+                SourceFilter=SourceFilter,
+                CategoryFilter=CategoryFilter,
+            )
+
+            filtered_response = build_media_dataset(
+                snapshot,
+                filteredNews,
+            )
+        else:
+            filtered_response = None
+
+        #JSON visszaküldése
+        return MediaAnalyticsResponse(
+            main=main_response,
+            filtered=filtered_response,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        ) from exc

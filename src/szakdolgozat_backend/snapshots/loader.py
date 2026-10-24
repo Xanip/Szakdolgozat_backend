@@ -1,3 +1,5 @@
+import pandas as pd
+
 from szakdolgozat_backend.database.queries import get_dataFrames
 from szakdolgozat_backend.snapshots.store import Snapshot
 
@@ -89,3 +91,31 @@ def _calculate_daily_rate_percent_change(snapshot: Snapshot) -> None:
     snapshot.DailyRatePercentChange = changes[
         ["BaseCurrency", "TargetCurrency", "DailyPercentChange"]
     ]
+    snapshot.DailyRatePercentChangeMatrix = (_build_daily_rate_percent_change_matrix(
+        snapshot.DailyRatePercentChange,
+        snapshot.DimCurrencies,
+    ))
+
+def _build_daily_rate_percent_change_matrix(
+    changes: pd.DataFrame,
+    currencies: pd.DataFrame,
+) -> pd.DataFrame:
+    currency_codes = currencies["CurrencyCode"].tolist()
+
+    matrix = (
+        changes.pivot(
+            index="BaseCurrency",
+            columns="TargetCurrency",
+            values="DailyPercentChange",
+        )
+        .reindex(
+            index=currency_codes,
+            columns=currency_codes,
+        )
+    )
+
+    # Azonos valutánál a változás 0.
+    for currency in currency_codes:
+        matrix.loc[currency, currency] = 0.0
+
+    return matrix

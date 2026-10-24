@@ -17,6 +17,7 @@ class Snapshot:
         self.DailyRatePercentChange = pd.DataFrame(
             columns=["BaseCurrency", "TargetCurrency", "DailyPercentChange"]
         )
+        self.DailyRatePercentChangeMatrix = pd.DataFrame()
 
     def get_snapshot_memory(self) -> dict[str, int]:
         """returns the memory usage of the snapshot's tables in bytes"""
