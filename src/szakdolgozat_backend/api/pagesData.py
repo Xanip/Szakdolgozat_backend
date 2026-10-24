@@ -170,30 +170,51 @@ def get_media_analytics_data(
     
     snapshot = request.app.state.snapshot
     try:
+        t0 = perf_counter()
         mainData = SelectedDateNews(snapshot, StartDate, ToDate)
+        print(
+            f"[MEDIA] SelectedDateNews: "
+            f"{perf_counter() - t0:.3f}s | rows={len(mainData)}",
+            flush=True,
+        )
         #ha van szűrő akkor elvégezzük a szűrést, ha nincs akkor a mainData-t használjuk a további feldolgozáshoz
         has_filter = (SourceFilter is not None or CategoryFilter is not None)
 
         # Csak akkor kell alapadatokat visszaküldeni,
         # ha IncludeMain=True.
+        t0 = perf_counter()
         main_response = (
             build_media_dataset(snapshot, mainData)
             if IncludeMain
             else None
         )
-        
+        print(
+            f"[MEDIA] Build main: {perf_counter() - t0:.3f}s",
+            flush=True,
+        )
         # Szűrt adatok csak aktív szűrő esetén.
         if has_filter:
+            t0 = perf_counter()
             filteredNews = NewsFilter(
                 snapshot=snapshot,
                 mainData=mainData,
                 SourceFilter=SourceFilter,
                 CategoryFilter=CategoryFilter,
             )
+            print(
+                f"[MEDIA] NewsFilter: {perf_counter() - t0:.3f}s "
+                f"| rows={len(filteredNews)}",
+                flush=True,
+            )
 
+            t0 = perf_counter()
             filtered_response = build_media_dataset(
                 snapshot,
                 filteredNews,
+            )
+            print(
+                f"[MEDIA] Build filtered: {perf_counter() - t0:.3f}s",
+                flush=True,
             )
         else:
             filtered_response = None
