@@ -38,6 +38,12 @@ def _calculate_daily_rate_percent_change(snapshot: Snapshot) -> None:
     previous_date_id = available_dates[-2]
     latest_date_id = available_dates[-1]
 
+    latest_date = snapshot.DimDates.loc[
+        snapshot.DimDates["DateID"].eq(latest_date_id),
+        "Date",
+    ].iloc[0]
+    snapshot.DailyRatePercentChangeDate = pd.to_datetime(latest_date).date()
+
     current = fact.loc[
         fact["DateID"].eq(latest_date_id),
         ["BaseCurrencyID", "CurrencyID", "Rate"],

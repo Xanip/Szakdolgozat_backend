@@ -1,5 +1,6 @@
 import pandas as pd
 from pandas import DataFrame
+from datetime import date
 from pydantic import BaseModel
 
 def exchangeRateChartResponse(
@@ -29,6 +30,7 @@ def waterfallVarianceResponse(waterfall_variance: DataFrame | None) -> dict:
     }
 
 class DailyHeatmapResponse(BaseModel):
+    calculation_date: date | None
     x_data: list[str]
     y_data: list[str]
     data: list[list[float | None]]

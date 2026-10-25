@@ -126,6 +126,7 @@ def get_daily_heatmap_data(
     start = perf_counter()
 
     response = DailyHeatmapResponse(
+        calculation_date=snapshot.DailyRatePercentChangeDate,
         x_data=filtered.columns.tolist(),
         y_data=filtered.index.tolist(),
         data=(

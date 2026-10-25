@@ -1,6 +1,7 @@
 
 
 import pandas as pd
+from datetime import date
 
 
 class Snapshot:
@@ -18,6 +19,7 @@ class Snapshot:
             columns=["BaseCurrency", "TargetCurrency", "DailyPercentChange"]
         )
         self.DailyRatePercentChangeMatrix = pd.DataFrame()
+        self.DailyRatePercentChangeDate: date | None = None
 
     def get_snapshot_memory(self) -> dict[str, int]:
         """returns the memory usage of the snapshot's tables in bytes"""
