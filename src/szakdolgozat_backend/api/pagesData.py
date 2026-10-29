@@ -5,6 +5,8 @@ from typing_extensions import Annotated
 from fastapi import APIRouter, HTTPException, Query, Request
 from szakdolgozat_backend.response_models.chartResponses import DailyHeatmapResponse
 from szakdolgozat_backend.response_models.mediaResponses import MediaAnalyticsResponse
+from szakdolgozat_backend.response_models.predictionResponses import PredictionPointResponse, PredictionResponse
+from szakdolgozat_backend.services.predictionServices import PredictionModel, get_all_predictions, get_prediction
 from szakdolgozat_backend.services.ratesServices import SelectedRateChart, WaterfallVariance, LatestRate, PreviousRate, StartPeriodRate, DailyPercentChange, PeriodPercentChange 
 from szakdolgozat_backend.services.mediaServices import NewsFilter, SelectedDateNews, build_media_dataset
 from szakdolgozat_backend.response_models.fx_performance import create_fx_performance_response
@@ -144,29 +146,17 @@ def get_daily_heatmap_data(
 def get_media_analytics_data(
     request: Request,
     StartDate:  date,
-    ToDate: date,
-    SourceFilter: str | None = None,
-    CategoryFilter: str | None = None,
-    IncludeMain: bool = True,
+    ToDate: date
 ):
     # return értékek 
-    # táblázat: Date, SourceName, CategoryName, Title, URL
-    # Döntött oszlop diagramm: Y=SourceName, X=Count
-    # Donut diagramm: jelmagyarázat=CategoryName, érték=Count
+    # mainData = táblázat: Date, SourceName, CategoryName, Title, URL
+    # ez a mainData, a Chart-okhoz szükséges adatokat a Front-End számolja ebből.
+    # Ez a kereszt szűrők egyszerűsítésére szolgál és hogy csökkentsük a hálózati forgalmat.
 
-    # két féle adat megadása:
-    # main: Category és Source szűrők nélkül
-    # szűrt: Category és Source szűrőkkel
     if StartDate > ToDate:
         raise HTTPException(
             status_code=422,
             detail="StartDate cannot be later than ToDate.",
-        )
-
-    if SourceFilter is not None and CategoryFilter is not None:
-        raise HTTPException(
-            status_code=422,
-            detail="SourceFilter and CategoryFilter cannot be used together.",
         )
     
     snapshot = request.app.state.snapshot
@@ -178,55 +168,67 @@ def get_media_analytics_data(
             f"{perf_counter() - t0:.3f}s | rows={len(mainData)}",
             flush=True,
         )
-        #ha van szűrő akkor elvégezzük a szűrést, ha nincs akkor a mainData-t használjuk a további feldolgozáshoz
-        has_filter = (SourceFilter is not None or CategoryFilter is not None)
 
         # Csak akkor kell alapadatokat visszaküldeni,
         # ha IncludeMain=True.
         t0 = perf_counter()
         main_response = (
             build_media_dataset(snapshot, mainData)
-            if IncludeMain
-            else None
         )
         print(
             f"[MEDIA] Build main: {perf_counter() - t0:.3f}s",
             flush=True,
         )
-        # Szűrt adatok csak aktív szűrő esetén.
-        if has_filter:
-            t0 = perf_counter()
-            filteredNews = NewsFilter(
-                snapshot=snapshot,
-                mainData=mainData,
-                SourceFilter=SourceFilter,
-                CategoryFilter=CategoryFilter,
-            )
-            print(
-                f"[MEDIA] NewsFilter: {perf_counter() - t0:.3f}s "
-                f"| rows={len(filteredNews)}",
-                flush=True,
-            )
-
-            t0 = perf_counter()
-            filtered_response = build_media_dataset(
-                snapshot,
-                filteredNews,
-            )
-            print(
-                f"[MEDIA] Build filtered: {perf_counter() - t0:.3f}s",
-                flush=True,
-            )
-        else:
-            filtered_response = None
 
         #JSON visszaküldése
         return MediaAnalyticsResponse(
             main=main_response,
-            filtered=filtered_response,
         )
     except ValueError as exc:
         raise HTTPException(
             status_code=422,
             detail=str(exc),
         ) from exc
+
+@router.get("/pages/Prediction")
+def get_prediction_data(
+    request: Request, 
+    BaseCurrency: str = Query(..., min_length=3, max_length=3), 
+    TargetCurrency: str = Query(..., min_length=3, max_length=3), 
+    StartDate:  date | None = None,
+    ToDate: date | None = None
+):
+    snapshot = request.app.state.snapshot
+    try:
+        predictions = get_all_predictions(
+            snapshot,
+            BaseCurrency,
+            TargetCurrency,
+            StartDate,
+            ToDate,
+        )
+
+        result = PredictionResponse(
+            baseCurrency=BaseCurrency,
+            targetCurrency=TargetCurrency,
+            predictions={
+                model_name: [
+                    PredictionPointResponse(
+                        date=row["Date"],
+                        predictedRate=row["PredictedRate"],
+                        lowerBound=row["LowerBound"],
+                        upperBound=row["UpperBound"],
+                    )
+                    for _, row in df.iterrows()
+                ]
+                for model_name, df in predictions.items()
+            },
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error occurred while fetching prediction data: {str(e)}",
+        )
+
+    return result

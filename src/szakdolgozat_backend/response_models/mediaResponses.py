@@ -9,17 +9,9 @@ class MediaTableRow(BaseModel):
     URL: str
 
 
-class MediaGroupCount(BaseModel):
-    Name: str
-    Count: int
-
-
 class MediaDataset(BaseModel):
     table: list[MediaTableRow]
-    by_category: list[MediaGroupCount]
-    by_source: list[MediaGroupCount]
 
 
 class MediaAnalyticsResponse(BaseModel):
-    main: MediaDataset | None
-    filtered: MediaDataset | None
+    main: MediaDataset
