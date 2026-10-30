@@ -8,12 +8,13 @@ from szakdolgozat_backend.snapshots.store import Snapshot
 #prediction model names like PROPHET, ARIMA, etc.
 class PredictionModel:
     PROPHET = "PROPHET"
-    #ARIMA = "ARIMA"
 
 PREDICTORS = {
     PredictionModel.PROPHET: predict_with_prophet,
-    # PredictionModel.ARIMA: predict_with_arima,
 }
+
+def get_all_model_names() -> list[str]:
+    return list(PREDICTORS.keys())
 
 def get_prediction(
         snapshot: Snapshot, 
@@ -59,6 +60,12 @@ def get_all_predictions(
         ToDate,
     )
 
+    return get_all_predictions_from_history(history)
+
+
+def get_all_predictions_from_history(
+    history: pd.DataFrame,
+) -> dict[str, pd.DataFrame]:
     if history.empty:
         return {
             model_name: pd.DataFrame(

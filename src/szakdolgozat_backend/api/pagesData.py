@@ -5,8 +5,15 @@ from typing_extensions import Annotated
 from fastapi import APIRouter, HTTPException, Query, Request
 from szakdolgozat_backend.response_models.chartResponses import DailyHeatmapResponse
 from szakdolgozat_backend.response_models.mediaResponses import MediaAnalyticsResponse
-from szakdolgozat_backend.response_models.predictionResponses import PredictionPointResponse, PredictionResponse
-from szakdolgozat_backend.services.predictionServices import PredictionModel, get_all_predictions, get_prediction
+from szakdolgozat_backend.response_models.predictionResponses import (
+    PredictionHistoryPointResponse,
+    PredictionPointResponse,
+    PredictionResponse,
+)
+from szakdolgozat_backend.services.predictionServices import (
+    get_all_predictions_from_history,
+    get_prediction_history,
+)
 from szakdolgozat_backend.services.ratesServices import SelectedRateChart, WaterfallVariance, LatestRate, PreviousRate, StartPeriodRate, DailyPercentChange, PeriodPercentChange 
 from szakdolgozat_backend.services.mediaServices import NewsFilter, SelectedDateNews, build_media_dataset
 from szakdolgozat_backend.response_models.fx_performance import create_fx_performance_response
@@ -190,7 +197,7 @@ def get_media_analytics_data(
             detail=str(exc),
         ) from exc
 
-@router.get("/pages/Prediction")
+@router.get("/pages/Prediction", response_model=PredictionResponse)
 def get_prediction_data(
     request: Request, 
     BaseCurrency: str = Query(..., min_length=3, max_length=3), 
@@ -200,24 +207,36 @@ def get_prediction_data(
 ):
     snapshot = request.app.state.snapshot
     try:
-        predictions = get_all_predictions(
+        history = get_prediction_history(
             snapshot,
             BaseCurrency,
             TargetCurrency,
             StartDate,
             ToDate,
         )
+        predictions = get_all_predictions_from_history(history)
 
         result = PredictionResponse(
             baseCurrency=BaseCurrency,
             targetCurrency=TargetCurrency,
+            history=[
+                PredictionHistoryPointResponse(
+                    date=row["Date"].date()
+                    if hasattr(row["Date"], "date")
+                    else row["Date"],
+                    rate=float(row["Rate"]),
+                )
+                for _, row in history.iterrows()
+            ],
             predictions={
                 model_name: [
                     PredictionPointResponse(
-                        date=row["Date"],
-                        predictedRate=row["PredictedRate"],
-                        lowerBound=row["LowerBound"],
-                        upperBound=row["UpperBound"],
+                        date=row["Date"].date()
+                        if hasattr(row["Date"], "date")
+                        else row["Date"],
+                        predictedRate=float(row["PredictedRate"]),
+                        lowerBound=float(row["LowerBound"]),
+                        upperBound=float(row["UpperBound"]),
                     )
                     for _, row in df.iterrows()
                 ]

@@ -2,6 +2,11 @@ from datetime import date
 from pydantic import BaseModel, ConfigDict
 
 
+class PredictionHistoryPointResponse(BaseModel):
+    date: date
+    rate: float
+
+
 class PredictionPointResponse(BaseModel):
     date: date
     predictedRate: float
@@ -14,4 +19,5 @@ class PredictionResponse(BaseModel):
 
     baseCurrency: str
     targetCurrency: str
+    history: list[PredictionHistoryPointResponse]
     predictions: dict[str, list[PredictionPointResponse]]
