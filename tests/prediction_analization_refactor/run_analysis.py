@@ -1,18 +1,36 @@
-"""Command-line entry point for prediction backtesting."""
+"""Command-line entry point, independent of the FastAPI app (main.py).
+
+From the Szakdolgozat_backend folder, any of these work:
+
+	python -m tests.prediction_analization_refactor
+	python -m tests.prediction_analization_refactor.run_analysis --pair EUR/USD
+	python tests/prediction_analization_refactor/run_analysis.py --mode all --force
+"""
 
 from __future__ import annotations
 
 import argparse
+import sys
+from pathlib import Path
+
+if __package__ in (None, ""):
+	# Started as a plain script: make the package and the backend importable.
+	_backend_root = Path(__file__).resolve().parents[2]
+	for _path in (_backend_root / "src", _backend_root):
+		if str(_path) not in sys.path:
+			sys.path.insert(0, str(_path))
+	__package__ = "tests.prediction_analization_refactor"
 
 from szakdolgozat_backend.snapshots.loader import load_snapshot
 
-from .configuration import (
+from .config import (
 	DEFAULT_PAIR_MODE,
 	DEFAULT_SELECTED_PAIRS,
 	CurrencyPairMode,
 	build_default_config,
 )
-from .orchestrator import run_prediction_analysis
+from .pipeline import run_prediction_analysis
+from .storage import PREDICTIONS_FILENAME, SUMMARY_FILENAME
 
 
 def _parse_pair(value: str) -> tuple[str, str]:
@@ -50,15 +68,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
 	args = build_parser().parse_args()
-	pair_mode = CurrencyPairMode(args.mode)
-	selected_pairs = tuple(args.pair or DEFAULT_SELECTED_PAIRS)
-	config = build_default_config(pair_mode, selected_pairs)
+	config = build_default_config(
+		CurrencyPairMode(args.mode),
+		tuple(args.pair or DEFAULT_SELECTED_PAIRS),
+	)
 
 	snapshot = load_snapshot()
 	state = run_prediction_analysis(snapshot, config, force=args.force)
 	print(f"Prediction analysis completed in {config.pair_mode} mode.")
-	print(f"Prediction JSON: {config.results_dir / 'AllPredictionTestsData.json'}")
-	print(f"Summary JSON: {config.results_dir / 'SummaryTestsData.json'}")
+	print(f"Prediction JSON: {config.results_dir / PREDICTIONS_FILENAME}")
+	print(f"Summary JSON: {config.results_dir / SUMMARY_FILENAME}")
 	print(f"Processed pairs: {len(state['predictions']['metadata'].get('currency_pairs', []))}")
 
 

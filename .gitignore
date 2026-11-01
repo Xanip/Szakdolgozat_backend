@@ -47,3 +47,4 @@ Thumbs.db
 
 # analysis results
 tests/prediction_analization/results/
+tests/prediction_analization_refactor/results/

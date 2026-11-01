@@ -1,6 +1,8 @@
-"""Shared result and error structures for prediction backtesting."""
+"""Result and error structures, plus the daily and summary metric formulas."""
 
-from dataclasses import asdict, dataclass
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass, fields
 from datetime import date
 from statistics import mean, median
 from typing import Any
@@ -21,6 +23,9 @@ class PredictionTestError:
 		result["reference_from_date"] = self.reference_from_date.isoformat()
 		result["reference_to_date"] = self.reference_to_date.isoformat()
 		return result
+
+
+_TEXT_FIELDS = {"base_currency", "target_currency", "model_name"}
 
 
 @dataclass(slots=True)
@@ -55,7 +60,7 @@ class DailyPredictionTestResult:
 		predicted_rate: float,
 		lower_bound: float,
 		upper_bound: float,
-	) -> "DailyPredictionTestResult":
+	) -> DailyPredictionTestResult:
 		if actual_rate == 0:
 			raise ValueError("actual_rate must not be zero")
 		if lower_bound > upper_bound:
@@ -70,7 +75,6 @@ class DailyPredictionTestResult:
 			range_error = actual_rate - upper_bound
 		else:
 			range_error = 0.0
-
 		range_percentage_error = range_error / actual_rate * 100
 
 		return cls(
@@ -94,10 +98,31 @@ class DailyPredictionTestResult:
 			interval_width=upper_bound - lower_bound,
 		)
 
+	@classmethod
+	def from_dict(cls, value: dict[str, Any]) -> DailyPredictionTestResult:
+		"""Inverse of to_dict(); extra keys are ignored."""
+		kwargs: dict[str, Any] = {}
+		for field in fields(cls):
+			raw = value[field.name]
+			if field.name == "date":
+				kwargs["date"] = date.fromisoformat(raw)
+			elif field.name == "in_range":
+				kwargs["in_range"] = bool(raw)
+			elif field.name in _TEXT_FIELDS:
+				kwargs[field.name] = raw
+			else:
+				kwargs[field.name] = float(raw)
+		return cls(**kwargs)
+
 	def to_dict(self) -> dict[str, Any]:
 		result = asdict(self)
 		result["date"] = self.date.isoformat()
 		return result
+
+
+_SUMMARY_IDENTITY_FIELDS = {
+	"base_currency", "target_currency", "model_name", "from_date", "to_date",
+}
 
 
 @dataclass(slots=True)
@@ -121,99 +146,51 @@ class PredictionSummaryResult:
 	def from_daily_results(
 		cls,
 		daily_results: list[DailyPredictionTestResult],
-	) -> "PredictionSummaryResult":
+	) -> PredictionSummaryResult:
 		if not daily_results:
 			raise ValueError("daily_results must not be empty")
 
-		pairs = {
-			(result.base_currency, result.target_currency)
-			for result in daily_results
-		}
-		models = {result.model_name for result in daily_results}
-
+		pairs = {(r.base_currency, r.target_currency) for r in daily_results}
+		models = {r.model_name for r in daily_results}
 		if len(pairs) != 1:
 			raise ValueError("daily_results must contain one currency pair")
 		if len(models) != 1:
 			raise ValueError("daily_results must contain one prediction model")
 
-		pair = next(iter(pairs))
-		range_errors = [
-			result.range_absolute_error
-			for result in daily_results
-			if result.range_absolute_error > 0
-		]
-
-		return cls(
-			base_currency=pair[0],
-			target_currency=pair[1],
-			model_name=next(iter(models)),
-			from_date=min(result.date for result in daily_results),
-			to_date=max(result.date for result in daily_results),
-			mae=mean(result.absolute_error for result in daily_results),
-			median_absolute_error=median(
-				result.absolute_error for result in daily_results
-			),
-			mape=mean(
-				result.absolute_percentage_error for result in daily_results
-			),
-			bias=mean(result.error for result in daily_results),
-			median_bias=median(result.error for result in daily_results),
-			coverage=mean(
-				result.in_range for result in daily_results
-			) * 100,
-			mean_range_absolute_error=(
-				mean(range_errors) if range_errors else None
-			),
-			median_range_absolute_error=(
-				median(range_errors) if range_errors else None
-			),
-			mean_interval_width=mean(
-				result.interval_width for result in daily_results
-			),
-		)
-
-	def to_dict(self) -> dict[str, Any]:
-		result = asdict(self)
-		result["from_date"] = self.from_date.isoformat()
-		result["to_date"] = self.to_date.isoformat()
-		return result
-
-
-@dataclass(slots=True)
-class CurrencyPairPredictionSummary:
-	base_currency: str
-	target_currency: str
-	best_model: str | None
-	model_mapes: dict[str, float]
-
-	@classmethod
-	def from_summaries(
-		cls,
-		summaries: list[PredictionSummaryResult],
-	) -> "CurrencyPairPredictionSummary":
-		if not summaries:
-			raise ValueError("summaries must not be empty")
-
-		pairs = {
-			(summary.base_currency, summary.target_currency)
-			for summary in summaries
-		}
-		if len(pairs) != 1:
-			raise ValueError("summaries must contain one currency pair")
-
-		model_mapes = {
-			summary.model_name: summary.mape
-			for summary in summaries
-		}
-		best_model = min(model_mapes, key=model_mapes.get)
 		base_currency, target_currency = next(iter(pairs))
+		absolute_errors = [r.absolute_error for r in daily_results]
+		errors = [r.error for r in daily_results]
+		range_errors = [
+			r.range_absolute_error for r in daily_results if r.range_absolute_error > 0
+		]
 
 		return cls(
 			base_currency=base_currency,
 			target_currency=target_currency,
-			best_model=best_model,
-			model_mapes=model_mapes,
+			model_name=next(iter(models)),
+			from_date=min(r.date for r in daily_results),
+			to_date=max(r.date for r in daily_results),
+			mae=mean(absolute_errors),
+			median_absolute_error=median(absolute_errors),
+			mape=mean(r.absolute_percentage_error for r in daily_results),
+			bias=mean(errors),
+			median_bias=median(errors),
+			coverage=mean(r.in_range for r in daily_results) * 100,
+			mean_range_absolute_error=mean(range_errors) if range_errors else None,
+			median_range_absolute_error=median(range_errors) if range_errors else None,
+			mean_interval_width=mean(r.interval_width for r in daily_results),
 		)
 
-	def to_dict(self) -> dict[str, Any]:
-		return asdict(self)
+	def to_entry(self, observation_count: int) -> dict[str, Any]:
+		"""Shape used in SummaryTestsData.json for one window."""
+		values = asdict(self)
+		return {
+			"from_date": self.from_date.isoformat(),
+			"to_date": self.to_date.isoformat(),
+			"observation_count": observation_count,
+			"summary_metrics": {
+				key: value
+				for key, value in values.items()
+				if key not in _SUMMARY_IDENTITY_FIELDS
+			},
+		}
