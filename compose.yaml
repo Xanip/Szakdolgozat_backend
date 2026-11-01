@@ -9,4 +9,5 @@ services:
       - .env
     environment:
       SNAPSHOT_CHUNK_SIZE: "100000"
+      RUN_PREDICTION_ANALYSIS: "${RUN_PREDICTION_ANALYSIS:-0}"
     restart: unless-stopped

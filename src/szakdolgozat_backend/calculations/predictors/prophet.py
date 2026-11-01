@@ -7,7 +7,7 @@ from prophet import Prophet
 logger = logging.getLogger(__name__)
 
 
-def predict_with_prophet(exchange_rates: pd.DataFrame, horizon: int = 30) -> pd.DataFrame:
+def predict_with_prophet(exchange_rates: pd.DataFrame, horizon: int = 30, validate_freshness: bool = True,) -> pd.DataFrame:
     started_at = time.perf_counter()
 
     required_columns = {
@@ -71,7 +71,7 @@ def predict_with_prophet(exchange_rates: pd.DataFrame, horizon: int = 30) -> pd.
     today = pd.Timestamp.today().normalize()
     last_date = history["ds"].max().normalize()
 
-    if (today - last_date).days > 30:
+    if validate_freshness and (today - last_date).days > 30:
         raise ValueError(
             f"Latest observation for {base}/{target} is stale: "
             f"{last_date.date()}."

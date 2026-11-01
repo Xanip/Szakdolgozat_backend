@@ -44,3 +44,6 @@ Thumbs.db
 
 # uv project cache
 .uv/
+
+# analysis results
+tests/prediction_analization/results/
