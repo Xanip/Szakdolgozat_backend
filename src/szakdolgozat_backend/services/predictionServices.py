@@ -1,6 +1,8 @@
 from datetime import date
 
 import pandas as pd 
+from szakdolgozat_backend.calculations.predictors.autoARIMA import predict_with_auto_arima
+from szakdolgozat_backend.calculations.predictors.chronos2 import predict_with_chronos
 from szakdolgozat_backend.calculations.predictors.prophet import predict_with_prophet
 from szakdolgozat_backend.services.ratesServices import SelectedRateChart
 from szakdolgozat_backend.snapshots.store import Snapshot
@@ -8,9 +10,13 @@ from szakdolgozat_backend.snapshots.store import Snapshot
 #prediction model names like PROPHET, ARIMA, etc.
 class PredictionModel:
     PROPHET = "PROPHET"
+    AUTO_ARIMA = "AUTO_ARIMA"
+    CHRONOS2 = "CHRONOS2"
 
 PREDICTORS = {
     PredictionModel.PROPHET: predict_with_prophet,
+    PredictionModel.AUTO_ARIMA: predict_with_auto_arima,
+    PredictionModel.CHRONOS2: predict_with_chronos,
 }
 
 def get_all_model_names() -> list[str]:

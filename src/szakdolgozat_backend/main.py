@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 from contextlib import asynccontextmanager
-from os import getenv
 
 from szakdolgozat_backend.api.health import router as health_router
 from szakdolgozat_backend.api.firstData import router as first_data_router
@@ -14,12 +13,6 @@ async def lifespan(app: FastAPI):
     snapshot = load_snapshot()
     app.state.snapshot = snapshot
 
-    if getenv("RUN_PREDICTION_ANALYSIS") == "1":
-        from tests.prediction_analization.configuration import build_default_config
-        from tests.prediction_analization.orchestrator import run_prediction_analysis
-
-        config = build_default_config()
-        app.state.prediction_analysis = run_prediction_analysis(snapshot, config)
     yield
 
 

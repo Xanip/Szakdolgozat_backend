@@ -229,7 +229,7 @@ def run_test_case(
 		progress(model_name, "started")
 		try:
 			kwargs: dict[str, Any] = {"horizon": horizon}
-			if model_name == "PROPHET":
+			if model_name == "PROPHET" or model_name == "AUTO_ARIMA" or model_name == "CHRONOS2":
 				kwargs["validate_freshness"] = False
 			prediction = predictor(history.copy(), **kwargs)
 			predictions[model_name] = _validate_prediction(
