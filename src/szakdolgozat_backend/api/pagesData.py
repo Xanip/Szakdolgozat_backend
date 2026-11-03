@@ -1,15 +1,19 @@
+import asyncio
 from datetime import date
 from fastapi.encoders import jsonable_encoder
 from typing_extensions import Annotated
+import logging
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from szakdolgozat_backend.response_models.chartResponses import DailyHeatmapResponse
+from szakdolgozat_backend.response_models.correlationResponses import AnyalysisPeriod, CategoryCorrelationRow, CorrelationObservationRow, CorrelationResponse, ExchangeRateSeriesRow
 from szakdolgozat_backend.response_models.mediaResponses import MediaAnalyticsResponse
 from szakdolgozat_backend.response_models.predictionResponses import (
     PredictionHistoryPointResponse,
     PredictionPointResponse,
     PredictionResponse,
 )
+from szakdolgozat_backend.services.correlationServices import analyze_correlation_results_with_llm, dateID_to_date, get_correlation_data, get_correlation_results, get_exchange_rate_series
 from szakdolgozat_backend.services.predictionServices import (
     get_all_predictions_from_history,
     get_prediction_history,
@@ -20,6 +24,8 @@ from szakdolgozat_backend.response_models.fx_performance import create_fx_perfor
 from pydantic import StringConstraints
 
 from time import perf_counter
+
+logger = logging.getLogger(__name__)
 
 CurrencyCode = Annotated[
     str,
@@ -251,3 +257,114 @@ def get_prediction_data(
         )
 
     return result
+
+
+#TODO:
+#   -DONE: Response model véglegesítése, a front end miatt
+#   -DONE: Függvényeket írni amik visszadják a response modellhez szükséges adatokat.
+#   -DONE: llm függvény befejezése
+#   -DONE: lokálil ollama modell bekötése Containerbe
+#   -Mi a helyzet a percentChange %-al az elemzésnél?
+#   -LOCK miközben egy adott devizapáron elemzést csinálunk, ugyan arra a devizapárra ne lehessen újabb elemzést indítani, 
+#       amíg az előző nem fejeződött be. Várakoztatja amíg az a számolás befejeződik és akkor már cache-ből adja vissza az eredményt.
+@router.get("/pages/Correlation", response_model=CorrelationResponse)
+async def get_correlation_page_data(
+    request: Request, 
+    BaseCurrency: str = Query(..., min_length=3, max_length=3), 
+    TargetCurrency: str = Query(..., min_length=3, max_length=3)
+):
+    snapshot = request.app.state.snapshot
+    BaseCurrency = BaseCurrency.upper()
+    TargetCurrency = TargetCurrency.upper()
+    cache_key = (BaseCurrency, TargetCurrency)
+    correlation_lock = snapshot.CorrelationResponseLocks.setdefault(
+        cache_key,
+        asyncio.Lock(),
+    )
+    try:
+        async with correlation_lock:
+            if cache_key in snapshot.CorrelationResponseCache:
+                return snapshot.CorrelationResponseCache[cache_key]
+
+            exchange_rate_series_df = get_exchange_rate_series(snapshot, BaseCurrency, TargetCurrency)
+            correlation_data_df = get_correlation_data(snapshot, BaseCurrency, TargetCurrency)
+            if snapshot.FactNews.empty:
+                data_start_date = None
+                data_end_date = None
+            else:
+                data_start_date = dateID_to_date(
+                    snapshot, snapshot.FactNews["DateID"].min()
+                )
+                data_end_date = dateID_to_date(
+                    snapshot, snapshot.FactNews["DateID"].max()
+                )
+
+            correlation_results_df = get_correlation_results(snapshot, BaseCurrency, TargetCurrency, correlation_data_df=correlation_data_df)
+            correlation_llm_analysis = await analyze_correlation_results_with_llm(
+                correlation_results_df,
+                BaseCurrency,
+                TargetCurrency,
+                start_date=data_start_date,
+                end_date=data_end_date,
+            )
+
+            correlation_rows = correlation_results_df.rename(
+                columns={"CategoryName": "category_name"}
+            ).to_dict(orient="records")
+            correlation_results = [
+                CategoryCorrelationRow(**row) for row in correlation_rows
+            ]
+
+            paired_observations = []
+            for observation_date, group in correlation_data_df.groupby("Date", sort=True):
+                first_row = group.iloc[0]
+                observation_date = (
+                    observation_date.date()
+                    if hasattr(observation_date, "date")
+                    else date.fromisoformat(str(observation_date))
+                )
+                paired_observations.append(
+                    CorrelationObservationRow(
+                        date=observation_date,
+                        exchange_rate=float(first_row["ExchangeRate"]),
+                        daily_change_pct=float(first_row["PercentChange"]),
+                        news_count={
+                            row["CategoryName"]: int(row["CategoryCount"])
+                            for _, row in group.iterrows()
+                        },
+                    )
+                )
+
+            exchange_rate_series = [
+                ExchangeRateSeriesRow(
+                    date=(
+                        row["Date"].date()
+                        if hasattr(row["Date"], "date")
+                        else date.fromisoformat(str(row["Date"]))
+                    ),
+                    exchange_rate=float(row["ExchangeRate"]),
+                )
+                for _, row in exchange_rate_series_df.iterrows()
+            ]
+
+            result = CorrelationResponse(
+                currency_pair=f"{BaseCurrency}/{TargetCurrency}",
+                correlation_analysis=correlation_llm_analysis,
+                analysis_period=AnyalysisPeriod(
+                    start_date=data_start_date,
+                    end_date=data_end_date,
+                ),
+                correlation_results=correlation_results,
+                paired_observations=paired_observations,
+                exchange_rate_series=exchange_rate_series,
+            )
+
+            snapshot.CorrelationResponseCache[cache_key] = result
+            return result
+
+    except Exception as e:
+        logger.exception("Error occurred while fetching correlation data")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error occurred while fetching correlation data: {type(e).__name__}: {e}"
+        ) from e

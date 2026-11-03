@@ -1,7 +1,10 @@
 
 
+import asyncio
 import pandas as pd
 from datetime import date
+
+from szakdolgozat_backend.response_models.correlationResponses import CorrelationResponse
 
 
 class Snapshot:
@@ -20,6 +23,16 @@ class Snapshot:
         )
         self.DailyRatePercentChangeMatrix = pd.DataFrame()
         self.DailyRatePercentChangeDate: date | None = None
+
+        # Cached correlation analysis responses
+        self.CorrelationResponseCache: dict[
+            tuple[str, str],
+            CorrelationResponse,
+        ] = {}
+        self.CorrelationResponseLocks: dict[
+            tuple[str, str],
+            asyncio.Lock,
+        ] = {}
 
     def get_snapshot_memory(self) -> dict[str, int]:
         """returns the memory usage of the snapshot's tables in bytes"""
