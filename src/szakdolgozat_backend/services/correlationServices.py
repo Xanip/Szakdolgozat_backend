@@ -307,6 +307,22 @@ async def analyze_correlation_results_with_llm(correlation_results_df: pd.DataFr
     return await generate_llm_response(CORRELATION_ANALYSIS_PROMPT)
 
 
+async def analyze_cached_correlation_with_llm(response: CorrelationResponse) -> str:
+    """Analyze a previously cached correlation response without recalculating it."""
+    BaseCurrency, TargetCurrency = response.currency_pair.split("/", maxsplit=1)
+    correlation_results_df = pd.DataFrame(
+        [row.model_dump() for row in response.correlation_results]
+    ).rename(columns={"category_name": "CategoryName"})
+
+    return await analyze_correlation_results_with_llm(
+        correlation_results_df,
+        BaseCurrency,
+        TargetCurrency,
+        start_date=response.analysis_period.start_date,
+        end_date=response.analysis_period.end_date,
+    )
+
+
 def dateID_to_date(snapshot: Snapshot, dateID: int) -> date:
     """
     Converts a dateID to a date object.

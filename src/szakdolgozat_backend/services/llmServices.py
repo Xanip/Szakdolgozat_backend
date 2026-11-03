@@ -24,6 +24,7 @@ async def generate_llm_response(prompt: str) -> str:
                     "model": OLLAMA_MODEL,
                     "prompt": prompt,
                     "stream": False,
+                    "think": False,
                     "keep_alive": "10m",
                     "options": {
                         "temperature": 0.0,

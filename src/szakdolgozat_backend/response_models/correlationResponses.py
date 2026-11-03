@@ -37,3 +37,6 @@ class CorrelationResponse(BaseModel):
     correlation_results: list[CategoryCorrelationRow]
     paired_observations: list[CorrelationObservationRow]
     exchange_rate_series: list[ExchangeRateSeriesRow]
+
+class LLMAnalysisResponse(BaseModel):
+    analysis: str

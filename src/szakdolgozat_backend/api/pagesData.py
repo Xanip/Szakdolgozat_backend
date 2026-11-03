@@ -6,14 +6,14 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from szakdolgozat_backend.response_models.chartResponses import DailyHeatmapResponse
-from szakdolgozat_backend.response_models.correlationResponses import AnyalysisPeriod, CategoryCorrelationRow, CorrelationObservationRow, CorrelationResponse, ExchangeRateSeriesRow
+from szakdolgozat_backend.response_models.correlationResponses import AnyalysisPeriod, CategoryCorrelationRow, CorrelationObservationRow, CorrelationResponse, ExchangeRateSeriesRow, LLMAnalysisResponse
 from szakdolgozat_backend.response_models.mediaResponses import MediaAnalyticsResponse
 from szakdolgozat_backend.response_models.predictionResponses import (
     PredictionHistoryPointResponse,
     PredictionPointResponse,
     PredictionResponse,
 )
-from szakdolgozat_backend.services.correlationServices import analyze_correlation_results_with_llm, dateID_to_date, get_correlation_data, get_correlation_results, get_exchange_rate_series
+from szakdolgozat_backend.services.correlationServices import analyze_cached_correlation_with_llm, dateID_to_date, get_correlation_data, get_correlation_results, get_exchange_rate_series
 from szakdolgozat_backend.services.predictionServices import (
     get_all_predictions_from_history,
     get_prediction_history,
@@ -300,13 +300,6 @@ async def get_correlation_page_data(
                 )
 
             correlation_results_df = get_correlation_results(snapshot, BaseCurrency, TargetCurrency, correlation_data_df=correlation_data_df)
-            correlation_llm_analysis = await analyze_correlation_results_with_llm(
-                correlation_results_df,
-                BaseCurrency,
-                TargetCurrency,
-                start_date=data_start_date,
-                end_date=data_end_date,
-            )
 
             correlation_rows = correlation_results_df.rename(
                 columns={"CategoryName": "category_name"}
@@ -349,7 +342,7 @@ async def get_correlation_page_data(
 
             result = CorrelationResponse(
                 currency_pair=f"{BaseCurrency}/{TargetCurrency}",
-                correlation_analysis=correlation_llm_analysis,
+                correlation_analysis="",
                 analysis_period=AnyalysisPeriod(
                     start_date=data_start_date,
                     end_date=data_end_date,
@@ -367,4 +360,46 @@ async def get_correlation_page_data(
         raise HTTPException(
             status_code=500,
             detail=f"Error occurred while fetching correlation data: {type(e).__name__}: {e}"
+        ) from e
+
+
+@router.get("/pages/Correlation/LLM", response_model=LLMAnalysisResponse)
+async def get_correlation_llm_analysis(
+    request: Request,
+    BaseCurrency: str = Query(..., min_length=3, max_length=3),
+    TargetCurrency: str = Query(..., min_length=3, max_length=3),
+):
+    snapshot = request.app.state.snapshot
+    BaseCurrency = BaseCurrency.upper()
+    TargetCurrency = TargetCurrency.upper()
+    cache_key = (BaseCurrency, TargetCurrency)
+    correlation_lock = snapshot.CorrelationResponseLocks.setdefault(
+        cache_key,
+        asyncio.Lock(),
+    )
+
+    try:
+        async with correlation_lock:
+            cached_response = snapshot.CorrelationResponseCache.get(cache_key)
+            if cached_response is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Correlation data has not been calculated for this currency pair.",
+                )
+
+            if cached_response.correlation_analysis:
+                return LLMAnalysisResponse(analysis=cached_response.correlation_analysis)
+
+            analysis = await analyze_cached_correlation_with_llm(cached_response)
+            snapshot.CorrelationResponseCache[cache_key] = cached_response.model_copy(
+                update={"correlation_analysis": analysis}
+            )
+            return LLMAnalysisResponse(analysis=analysis)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Error occurred while generating correlation LLM analysis")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error occurred while generating correlation LLM analysis: {type(e).__name__}: {e}"
         ) from e
